@@ -1,8 +1,10 @@
 fastapi
 uvicorn
-langchain
-langchain-google-genai
-duckduckgo-search>=5.0.0
-langchain-community
-beautifulsoup4
+pydantic
 requests
+beautifulsoup4
+langchain-core
+langchain-community
+langchain-google-genai
+ddgs
+duckduckgo-search
