@@ -1,4 +1,3 @@
-```python
 import os
 import shutil
 import uuid
@@ -40,14 +39,13 @@ app.add_middleware(
 
 
 # =========================================================
-# 2. RAG 설정
-# Google 공식 임베딩 모델로 변경
+# 2. RAG 설정 (gemini-2.0-flash 및 gemini-embedding-001)
 # =========================================================
 
 RAG_CONFIG = {
     "vector_db": "Chroma DB",
     "embedding_model": "models/gemini-embedding-001",
-    "llm_model": "gemini-3.8-flash",
+    "llm_model": "gemini-2.0-flash",
     "multi_query_retriever": "MultiQueryRetriever (다중 질문 검색기)",
     "query_expansion": "LCEL RunnablePassthrough 기반 질의 확장",
     "system_role": "당신은 도시 계획 설계자입니다. 특히 서울시에 특화된 설계자로 사용자의 질문에 답변하세요."
@@ -100,24 +98,23 @@ def format_docs(docs):
 
 # =========================================================
 # 7. RAG 체인 초기화
-# MultiQueryRetriever + LCEL
+# MultiQueryRetriever + LCEL RunnablePassthrough
 # =========================================================
 
 def init_chain(vs: Chroma):
     global rag_chain
 
-    # 기본 검색기 구성
     base_retriever = vs.as_retriever(
         search_kwargs={"k": 3}
     )
 
-    # 다중 질문 검색기 구성
+    # 다중 질문 검색기(MultiQueryRetriever) 구성
     multi_retriever = MultiQueryRetriever.from_llm(
         retriever=base_retriever,
         llm=llm
     )
 
-    # 서울시 특화 도시 계획가 시스템 프롬프트
+    # 서울시 특화 도시 계획가 시스템 프롬프트 주입
     system_prompt = (
         f"{RAG_CONFIG['system_role']}\n\n"
         "제공된 서울시 도시계획 가이드 문서를 바탕으로 "
@@ -155,7 +152,7 @@ class QueryRequest(BaseModel):
 
 
 # =========================================================
-# 9. Health Check
+# 9. Health Check 엔드포인트
 # =========================================================
 
 @app.get("/health")
@@ -167,7 +164,7 @@ def health_check():
 
 
 # =========================================================
-# 10. RAG 설정 확인
+# 10. RAG 설정 확인 엔드포인트
 # =========================================================
 
 @app.get("/config")
@@ -176,24 +173,32 @@ def get_config():
 
 
 # =========================================================
-# 11. Google AI 지원 모델 확인
+# 11. Google AI 지원 모델 확인 엔드포인트
 # =========================================================
 
 @app.get("/models")
 def list_supported_models():
     try:
         genai.configure(api_key=GOOGLE_API_KEY)
+        all_models = list(genai.list_models())
 
         embed_models = [
             m.name
-            for m in genai.list_models()
+            for m in all_models
             if "embedContent" in m.supported_generation_methods
+        ]
+        chat_models = [
+            m.name
+            for m in all_models
+            if "generateContent" in m.supported_generation_methods
         ]
 
         return {
             "status": "success",
             "configured_embedding_model": RAG_CONFIG["embedding_model"],
-            "available_embedding_models": embed_models
+            "configured_llm_model": RAG_CONFIG["llm_model"],
+            "available_embedding_models": embed_models,
+            "available_chat_models": chat_models
         }
 
     except Exception as e:
@@ -204,30 +209,28 @@ def list_supported_models():
 
 
 # =========================================================
-# 12. PDF 업로드 및 벡터 DB 색인
+# 12. PDF 업로드 및 Chroma DB 색인
 # =========================================================
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
     global vectorstore
 
-    # PDF 파일 형식 확인
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=400,
             detail="PDF 파일만 업로드할 수 있습니다."
         )
 
-    # 임시 파일명 생성
     temp_filename = f"{uuid.uuid4().hex}.pdf"
     temp_path = os.path.join("/tmp", temp_filename)
 
     try:
-        # PDF 임시 저장
+        # 1. PDF 임시 저장
         with open(temp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        # PDF 문서 로드
+        # 2. PDF 파싱
         loader = PyPDFLoader(temp_path)
         docs = loader.load()
 
@@ -237,13 +240,18 @@ async def upload_pdf(file: UploadFile = File(...)):
                 detail="PDF에서 문서 내용을 추출하지 못했습니다."
             )
 
-        # 문서 분할
+        # 3. Quota(429) 초과 방지를 위해 상위 5페이지만 슬라이싱
+        docs = docs[:5]
+
+        # 4. 청크 분할
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=150
         )
-
         chunks = splitter.split_documents(docs)
+
+        # 5. 무료 티어 요청 한도 보호를 위해 청크 수를 최대 15개로 제한
+        chunks = chunks[:15]
 
         if not chunks:
             raise HTTPException(
@@ -251,7 +259,11 @@ async def upload_pdf(file: UploadFile = File(...)):
                 detail="PDF에서 색인할 텍스트를 찾지 못했습니다."
             )
 
-        # 기존 컬렉션 초기화 후 새 임베딩으로 색인
+        # 6. 이전 임베딩 잔여 캐시 충돌 방지를 위한 디렉터리 초기화
+        if os.path.exists(CHROMA_PERSIST_DIR):
+            shutil.rmtree(CHROMA_PERSIST_DIR, ignore_errors=True)
+
+        # 7. Chroma DB 벡터 저장소 생성
         vectorstore = Chroma.from_documents(
             documents=chunks,
             embedding=embeddings,
@@ -259,7 +271,7 @@ async def upload_pdf(file: UploadFile = File(...)):
             collection_name="seoul_urban_planner"
         )
 
-        # RAG 체인 초기화
+        # 8. RAG 파이프라인 초기화
         init_chain(vectorstore)
 
         return {
@@ -282,13 +294,12 @@ async def upload_pdf(file: UploadFile = File(...)):
         )
 
     finally:
-        # 임시 PDF 파일 삭제
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
 
 # =========================================================
-# 13. RAG 기반 질문 및 답변
+# 13. RAG 기반 질의응답
 # =========================================================
 
 @app.post("/chat")
@@ -314,4 +325,3 @@ def chat(req: QueryRequest):
             status_code=500,
             detail=f"답변 생성 중 오류가 발생했습니다: {str(e)}"
         )
-```
