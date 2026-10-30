@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import google.generativeai as genai
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -25,10 +26,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 과제 요구 명세 메타데이터 (임베딩 모델을 호환성 높은 embedding-001로 지정)
+# 과제 요구 명세 메타데이터 (공식 구글 임베딩 text-embedding-004 복원)
 RAG_CONFIG = {
     "vector_db": "Chroma DB",
-    "embedding_model": "models/embedding-001",
+    "embedding_model": "models/text-embedding-004",
     "llm_model": "gemini-1.5-flash",
     "multi_query_retriever": "MultiQueryRetriever (다중 질문 검색기)",
     "query_expansion": "LCEL RunnablePassthrough 기반 질의 확장",
@@ -98,6 +99,19 @@ def health_check():
 @app.get("/config")
 def get_config():
     return RAG_CONFIG
+
+# API 키 및 지원 모델 진단용 엔드포인트
+@app.get("/models")
+def list_supported_models():
+    try:
+        genai.configure(api_key=GOOGLE_API_KEY)
+        embed_models = [
+            m.name for m in genai.list_models()
+            if "embedContent" in m.supported_generation_methods
+        ]
+        return {"status": "success", "available_embedding_models": embed_models}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
 
 @app.post("/upload")
 async def upload_pdf(file: UploadFile = File(...)):
