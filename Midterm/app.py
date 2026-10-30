@@ -25,10 +25,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 과제 요구 명세 메타데이터
+# 과제 요구 명세 메타데이터 (임베딩 모델을 호환성 높은 embedding-001로 지정)
 RAG_CONFIG = {
     "vector_db": "Chroma DB",
-    "embedding_model": "models/text-embedding-004",
+    "embedding_model": "models/embedding-001",
     "llm_model": "gemini-1.5-flash",
     "multi_query_retriever": "MultiQueryRetriever (다중 질문 검색기)",
     "query_expansion": "LCEL RunnablePassthrough 기반 질의 확장",
