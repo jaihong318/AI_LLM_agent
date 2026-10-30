@@ -30,7 +30,7 @@ app.add_middleware(
 RAG_CONFIG = {
     "vector_db": "Chroma DB",
     "embedding_model": "models/text-embedding-004",
-    "llm_model": "gemini-1.5-flash",
+    "llm_model": "gemini-2.5-flash",
     "multi_query_retriever": "MultiQueryRetriever (다중 질문 검색기)",
     "query_expansion": "LCEL RunnablePassthrough 기반 질의 확장",
     "system_role": "당신은 도시 계획 설계자입니다. 특히 서울시에 특화된 설계자로 사용자의 질문에 답변하세요."
