@@ -24,6 +24,8 @@ from typing_extensions import TypedDict
 
 load_dotenv()
 
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+
 SYSTEM_PROMPT_TEMPLATE = """너는 신문기자이다.
 최근 {about}에 대해 비판하는 심층 분석 기사를 쓰려고 한다.
 
@@ -223,10 +225,14 @@ class BasicToolNode:
 TOOLS = [get_current_time, get_web_search]
 
 
+def _get_model_name() -> str:
+    """Resolve the active Gemini model name from `GEMINI_MODEL` or default."""
+    return os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip() or DEFAULT_GEMINI_MODEL
+
+
 def _build_llm_with_tools() -> Any:
     """Instantiate Google Gemini chat model bound with research tools."""
-    model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash"
-    llm = ChatGoogleGenerativeAI(model=model_name, temperature=0.3)
+    llm = ChatGoogleGenerativeAI(model=_get_model_name(), temperature=0.3)
     return llm.bind_tools(TOOLS)
 
 
@@ -328,7 +334,7 @@ def health() -> HealthResponse:
         ok=True,
         google_api_configured=bool(os.getenv("GOOGLE_API_KEY", "").strip()),
         search_provider="tavily" if os.getenv("TAVILY_API_KEY", "").strip() else "duckduckgo-fallback",
-        model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip() or "gemini-2.5-flash",
+        model=_get_model_name(),
     )
 
 
